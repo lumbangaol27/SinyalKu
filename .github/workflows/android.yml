@@ -1,0 +1,63 @@
+name: Bangun APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Uji logika (tanpa Android)
+        run: |
+          mkdir -p out
+          javac -encoding UTF-8 -d out app/src/main/java/id/sinyalku/app/Logic.java test/LogicTest.java
+          java -Dfile.encoding=UTF-8 -cp out LogicTest
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Bangun APK debug
+        run: gradle --no-daemon --console=plain assembleDebug 2>&1 | tee build.log
+
+      - name: Tampilkan galat kompilasi
+        if: failure()
+        run: |
+          grep -E "error:|FAILED|What went wrong|Could not|AAPT" -A3 build.log | head -60 | while IFS= read -r l; do echo "::error::$l"; done
+
+      - name: Pastikan memakai kunci tetap
+        run: |
+          WANT=$(keytool -list -v -keystore debug.keystore -storepass android | grep 'SHA256:' | head -1 | tr -d ' ')
+          GOT=$(keytool -printcert -jarfile app/build/outputs/apk/debug/app-debug.apk | grep 'SHA256:' | head -1 | tr -d ' ')
+          echo "kunci tetap: $WANT"; echo "kunci APK  : $GOT"
+          if [ "$WANT" != "$GOT" ]; then echo "::error::APK tidak memakai kunci tetap"; exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sinyalku-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Terbitkan APK di Releases (unduh langsung)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK="SinyalKu_v0.1.${GITHUB_RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK"
+          gh release delete apk-terbaru --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create apk-terbaru "$APK" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "APK terbaru (v0.1.${GITHUB_RUN_NUMBER})" \
+            --notes "Unduh berkas .apk di bawah lalu pasang. Pasang di dua HP: satu sebagai HP hotspot, satu sebagai HP pemantau."
