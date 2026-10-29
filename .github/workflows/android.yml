@@ -30,7 +30,9 @@ jobs:
           gradle-version: 8.7
 
       - name: Bangun APK debug
-        run: gradle --no-daemon --console=plain assembleDebug 2>&1 | tee build.log
+        run: |
+          set -o pipefail
+          gradle --no-daemon --console=plain assembleDebug 2>&1 | tee build.log
 
       - name: Tampilkan galat kompilasi
         if: failure()
